@@ -1,0 +1,22 @@
+{
+  "name": "fatline-chrome",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node build.mjs --test && node test/e2e/run.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "preact": "11.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.7",
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

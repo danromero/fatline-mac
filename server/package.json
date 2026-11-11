@@ -1,0 +1,19 @@
+{
+  "name": "fatline-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Your own proxy to Neynar for the Fatline Farcaster client.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.1"
+  }
+}

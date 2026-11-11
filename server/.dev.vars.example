@@ -1,0 +1,2 @@
+NEYNAR_API_KEY=your-neynar-key # From https://dev.neynar.com
+PATH_SECRET=change-me # At least 32 letters, numbers, dashes, or underscores. Generate one with: openssl rand -hex 24
