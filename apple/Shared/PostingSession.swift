@@ -320,6 +320,7 @@ final class PostingSession {
     func loadDraft() {
         do {
             guard let store else { return }
+            try store.adoptLegacy(from: DraftStore(directory: Platform.appFolder))
             draft = try store.load()
             savedDraft = draft
             ready = true

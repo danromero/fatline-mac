@@ -150,17 +150,39 @@ extension View {
         toolbar {
             // The portal sits on the paper, so it doesn't take the toolbar's own background.
             ToolbarItem(placement: .principal) {
-                Image("Portal")
-                    .resizable()
-                    .frame(width: 28, height: 28)
-                    .clipShape(.circle)
+                // The portal, or a menu that switches networks once there are any.
+                TitleSwitcher(showsPortal: showsPortal)
+                    .accessibilityHidden(!showsPortal)
+            }
+            .sharedBackgroundVisibility(.hidden)
+            // Kept in place on sign-in too, hidden, for the same reason as the portal.
+            ToolbarItem(placement: .primaryAction) {
+                SettingsButton()
                     .opacity(showsPortal ? 1 : 0)
-                    .accessibilityLabel("Fatline feed")
+                    .disabled(!showsPortal)
                     .accessibilityHidden(!showsPortal)
             }
             .sharedBackgroundVisibility(.hidden)
         }
         .toolbarBackground(FatlineStyle.paper, for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+    }
+}
+
+/// Settings, on the title bar's trailing side, the same as Settings… and ⌘,.
+struct SettingsButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button { openWindow(id: "settings") } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 15)) // layout-ok: a bar glyph, the same size as the network title bar's tray
+                .foregroundStyle(FatlineStyle.secondary)
+                .frame(width: FatlineStyle.avatarSize, height: FatlineStyle.avatarSize)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("Settings")
+        .accessibilityLabel("Settings")
     }
 }

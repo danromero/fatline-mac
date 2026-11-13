@@ -10,6 +10,14 @@ const signedKeyRequest = [
   { name: "key", type: "bytes" },
   { name: "deadline", type: "uint256" }
 ];
+// A Fatline network device key, approved once per device. See docs/NETWORK.md. Farcaster doesn't
+// accept this as a key of its own, because both the domain and the type are Fatline's.
+const fatlineDomain = { name: "Fatline", version: "1" };
+const deviceKey = [
+  { name: "fid", type: "uint256" },
+  { name: "key", type: "bytes" },
+  { name: "issuedAt", type: "uint256" }
+];
 const keyAdd = [
   { name: "fid", type: "uint256" },
   { name: "key", type: "bytes" },
@@ -31,6 +39,12 @@ globalThis.recoverFarcasterAccount = (phrase) => {
   };
   return {
     address: address,
+    approveDevice(fid, key, issuedAt) {
+      return sign({
+        domain: fatlineDomain, types: { DeviceKey: deviceKey }, primaryType: "DeviceKey",
+        message: { fid: BigInt(fid), key, issuedAt: BigInt(issuedAt) }
+      });
+    },
     authorize(fid, key, deadline, nonce, ttl) {
       const requestFid = BigInt(fid);
       const deadlineValue = BigInt(deadline);

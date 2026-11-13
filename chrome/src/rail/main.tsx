@@ -452,6 +452,21 @@ function BackBar({ title, onBack, right }: { title: string; onBack: () => void; 
 function Settings({ view, onBack, onPeople }: { view: View; onBack: () => void; onPeople: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const copyDiagnostics = async () => {
+    try {
+      copy(await rpc("diagnostics"));
+      setCopied(true);
+    } catch {}
+  };
+
   return (
     <>
       <BackBar title="Settings" onBack={onBack} />
@@ -464,6 +479,8 @@ function Settings({ view, onBack, onPeople }: { view: View; onBack: () => void; 
           <span>Connection</span>
           <span class="settings-value"><span class="meta">{view.connectionName}</span><Chevron /></span>
         </button>
+        <div class="divider" />
+        <button class="settings-row" onClick={() => void copyDiagnostics()}><span aria-live="polite">{copied ? "Copied" : "Copy Diagnostics"}</span></button>
         <div class="divider" />
         <div class="meta settings-version">{view.version}</div>
       </div>

@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fatline-network",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "fatline-network" }],
+  // Uploaded images and the sizes made from them. The Images binding makes the sizes.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "fatline-network-media" }],
+  "images": { "binding": "IMAGES" },
+  // The invite page serves its fonts from the Worker itself.
+  "rules": [{ "type": "Data", "globs": ["**/*.woff2"] }],
+  // Hourly: retention. At 04:00 UTC it also checks usernames and custody addresses.
+  "triggers": { "crons": ["0 * * * *"] },
+  "ratelimits": [
+    { "name": "REQUESTS", "namespace_id": "2001", "simple": { "limit": 300, "period": 60 } },
+    { "name": "MESSAGES", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "JOINS", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } },
+    // Optimism lookups for joins from new devices, for the whole network, since anyone can ask about any FID.
+    { "name": "CUSTODY", "namespace_id": "2004", "simple": { "limit": 30, "period": 60 } },
+    // Image links and the network's picture, by address. A feed full of pictures stays well under it.
+    { "name": "PICTURES", "namespace_id": "2005", "simple": { "limit": 1000, "period": 60 } },
+    // A member's reads, by FID. The apps make about 4 a minute; each feed read is the heaviest query there is.
+    { "name": "READS", "namespace_id": "2006", "simple": { "limit": 30, "period": 60 } }
+  ],
+  "vars": {
+    // The FID of the person who runs this network. They're let in at once, as its admin.
+    "ADMIN_FID": ""
+  },
+  "observability": { "enabled": true }
+}

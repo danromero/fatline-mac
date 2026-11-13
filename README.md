@@ -1,6 +1,6 @@
 # Fatline
 
-A small Farcaster client for Mac, iPhone, and Chrome, and a reference for building one. It reads the people you follow, posts, and deletes. Each app builds its feed and signs every message on your own device.
+A small Farcaster client for Mac, iPhone, and Chrome, and a reference for building one. It reads the people you follow, posts, and deletes. Each app builds its feed and signs every message on your own device. The Mac and iPhone apps also join private networks: small social networks on a server of your own, for people you know on Farcaster.
 
 Fatline has no built-in server or API key. You choose how it connects.
 
@@ -11,12 +11,13 @@ Fatline has no built-in server or API key. You choose how it connects.
 | [`apple`](apple) | The Mac and iPhone apps, in one Xcode project that shares most of its code | [Download for Mac](https://github.com/danromero/fatline-monorepo/releases/latest/download/Fatline.dmg) or [join the iPhone beta on TestFlight](https://testflight.apple.com/join/SnTSSbrE) |
 | [`chrome`](chrome) | A Chrome extension that puts Fatline in x.com's sidebar | [Build it and load it](chrome/README.md#run-it-locally) |
 | [`server`](server) | A Cloudflare Worker that forwards Fatline's reads and posts to your own Neynar account | [Deploy it](server/README.md) |
-| [`docs`](docs/SERVER.md) | What a server has to answer to hand out codes | |
+| [`network`](network) | A private network's server, a Cloudflare Worker on D1 and R2 | [Try it locally](network/README.md#try-it) |
+| [`docs`](docs) | What a server has to answer to hand out codes ([SERVER.md](docs/SERVER.md)), and what a network server answers ([NETWORK.md](docs/NETWORK.md)) | |
 | [`recovery`](recovery) | The offline signing helper that turns a recovery phrase into a new posting key, shared by the apps and the extension | |
 
 ## Left out on purpose
 
-Fatline is an opinionated client. These aren't in it, and there are no plans to add them:
+Fatline is an opinionated client. On Farcaster, these aren't in it, and there are no plans to add them:
 
 - Replies
 - Reactions
@@ -25,7 +26,7 @@ Fatline is an opinionated client. These aren't in it, and there are no plans to 
 - Follow and unfollow
 - Interacting with people you don't already follow
 
-If you want any of that, use another client or fork this one.
+If you want any of that, use another client or fork this one. Private networks are the exception: everyone in one knows each other, so posts there have replies and likes.
 
 ## Connecting
 
@@ -38,6 +39,12 @@ Setup asks for a Neynar key, with buttons to use a code or a custom server inste
 | Advanced | An HTTPS server that answers Neynar's feed routes and Snapchain's | Whoever runs it |
 
 Anyone can run either kind of server. To set up a custom server, give a coding agent [this guide](https://fatline.tech/custom-server.md), or deploy [`server`](server) yourself. [docs/SERVER.md](docs/SERVER.md) describes what an invite server has to answer.
+
+## Private networks
+
+A network is a small private social network on one server: everyone in it can read everyone else, and nobody outside can read anything. People join with their Farcaster account, and the admin decides who gets in, by invite code, by request, or because the admin follows them on Farcaster. Posts, replies, and likes stay on the network and never reach Farcaster. In the Mac and iPhone apps, Add Network takes a network's address or an invite code.
+
+Joining asks for your recovery phrase once per device, to approve a key for that device, and the network checks with Farcaster's ID registry that the phrase owns your FID. Whoever runs a network's server can read everything posted there. [docs/NETWORK.md](docs/NETWORK.md) is the spec, written so anyone can build a client or a server against it, and [`network`](network) is a server that follows it.
 
 ## Your keys
 

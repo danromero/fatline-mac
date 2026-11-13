@@ -4,5 +4,9 @@
 <dict>
 	<key>ATSApplicationFontsPath</key>
 	<string>.</string>
+	<key>FatlineDefaultServer</key>
+	<string>$(FATLINE_DEFAULT_SERVER)</string>
+	<key>FatlinePilotFeed</key>
+	<string>$(FATLINE_PILOT_FEED)</string>
 </dict>
 </plist>

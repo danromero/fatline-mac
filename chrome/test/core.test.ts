@@ -401,6 +401,29 @@ describe("the feed", () => {
     const down = failing(503, false);
     await down.start(true);
     assert.equal(down.problem, "unreachable");
+    assert.match(down.diagnostics({ app: "Fatline", connection: "Neynar" }), /problem unreachable\n[\s\S]* sign-in \d+\.\ds failed: HTTP 503$/);
+  });
+
+  test("diagnostics list recent refreshes and never cast text", async () => {
+    const { feed, tick } = model();
+    await feed.start(true);
+    await feed.addPosted({ hash: "0xmine", fid: 1, time: 1_790_000_000, text: "mine" });
+    tick(30);
+    await feed.refresh("launch");
+    const report = feed.diagnostics({ app: "Fatline 0.1.0, Google Chrome 157.0.8103.52, macOS 27.0.0", connection: "Custom Server" });
+    assert.equal(report, [
+      "Fatline 0.1.0, Google Chrome 157.0.8103.52, macOS 27.0.0",
+      "Now 2026-09-21T14:13:50Z",
+      "Connection Custom Server",
+      "Account FID 1",
+      "People 1, hidden 0",
+      "Casts in feed 2, problem none",
+      "Last checked 2026-09-21T14:13:20Z",
+      "Refreshing no, save failed no",
+      "Refreshes, newest first:",
+      "2026-09-21T14:13:50Z launch 0.0s unchanged, age 30s",
+      "2026-09-21T14:13:20Z sign-in 0.0s updated 1 casts, age 0s",
+    ].join("\n"));
   });
 
   test("a server change drops its casts", async () => {

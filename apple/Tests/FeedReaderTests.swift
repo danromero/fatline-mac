@@ -415,15 +415,37 @@ final class ConnectionChoiceTests: XCTestCase {
     }
 
     func testAnInviteKeepsItsCodeExactlyAndNamesOneHTTPSServer() throws {
-        let invite = try XCTUnwrap(Invite(typed: " AbCd-1234@Server.Example\n"))
+        let invite = try XCTUnwrap(Invite(typed: " AbCd-1234@Server.Example\n", defaultServer: nil))
         XCTAssertEqual(invite.code, "AbCd-1234")
         XCTAssertEqual(invite.address, "Server.Example")
         XCTAssertEqual(Invite(typed: invite.text), invite)
         for bad in ["", "  ", "ABCD", "ABCD@", "@server.example", "ABCD EFGH@server.example", "A@B@server.example",
                     "ABCD@http://server.example", "ABCD@server.example?x=1", "ABCD@server.example#x", "AB\r\nX: y@server.example",
                     String(repeating: "A", count: 129) + "@server.example"] {
-            XCTAssertNil(Invite(typed: bad), bad)
+            XCTAssertNil(Invite(typed: bad, defaultServer: nil), bad)
         }
+    }
+
+    func testACodeAloneGoesToTheBuildsDefaultServer() throws {
+        let server = try XCTUnwrap(URL(string: "https://api.example.com"))
+        let invite = try XCTUnwrap(Invite(typed: " ABCD-EFGH-JKLM\n", defaultServer: server))
+        XCTAssertEqual(invite.code, "ABCD-EFGH-JKLM")
+        XCTAssertEqual(invite.server, server)
+        XCTAssertEqual(Invite(typed: "ABCD@other.example", defaultServer: server)?.address, "other.example")
+        XCTAssertNil(Invite(typed: "ABCD-EFGH-JKLM", defaultServer: nil))
+        XCTAssertNil(Invite(typed: "ABCD EFGH", defaultServer: server))
+    }
+
+    func testACodeSavedAloneMeansTheDefaultServer() throws {
+        let server = try XCTUnwrap(URL(string: "https://api.example.com"))
+        let saved = Data(#"{"invite":{"_0":"ABCD-EFGH-JKLM"}}"#.utf8)
+        let decoder = JSONDecoder()
+        // A build with no default server can't tell where a code saved alone belongs.
+        if Invite.defaultServer == nil { XCTAssertThrowsError(try decoder.decode(ConnectionChoice.self, from: saved)) }
+        decoder.userInfo[Invite.defaultServerKey] = server
+        XCTAssertEqual(try decoder.decode(ConnectionChoice.self, from: saved), .invite(try XCTUnwrap(Invite(typed: "ABCD-EFGH-JKLM@api.example.com"))))
+        let current = try JSONEncoder().encode(ConnectionChoice.invite(try XCTUnwrap(Invite(typed: "ABCD@other.example"))))
+        XCTAssertEqual(try JSONDecoder().decode(ConnectionChoice.self, from: current), .invite(try XCTUnwrap(Invite(typed: "ABCD@other.example"))))
     }
 
     func testAnInviteServerWithoutTheRoutesSaysSo() async {
@@ -765,19 +787,42 @@ final class LocalFeedTests: XCTestCase {
         XCTAssertEqual(feedLimits(server), ["10"])
     }
 
-    func testAListCanOnlyBeRebuiltEvery30Seconds() async throws {
+    private func listReads(_ server: FakeServer) -> Int {
+        server.requests.filter { $0.url!.path().hasSuffix("linksByFid") }.count
+    }
+
+    func testAListReadInTheLast30SecondsIsntReadAgain() async throws {
         let clock = Clock(start)
-        let (feed, _) = make(Network([]), clock: clock)
+        let (feed, server) = make(Network([]), clock: clock)
         _ = try await feed.rebuildPeople()
         clock.advance(29)
-        do {
-            _ = try await feed.rebuildPeople()
-            XCTFail("Expected a 429")
-        } catch {
-            XCTAssertEqual((error as? FeedHTTPError)?.status, 429)
-        }
+        server.forget()
+        let again = try await feed.rebuildPeople()
+        XCTAssertEqual(again.file?.people.map(\.id), [10])
+        XCTAssertEqual(listReads(server), 0)
         clock.advance(1)
         _ = try await feed.rebuildPeople()
+        XCTAssertEqual(listReads(server), 1)
+    }
+
+    /// A failed read used to block the next 30 seconds and report a 429 the server never sent.
+    func testAFailedListCanBeTriedAgainRightAwayAfterARelaunch() async throws {
+        let clock = Clock(start)
+        let network = Network([])
+        network.change { $0.failList = true }
+        let (first, _) = make(network, clock: clock)
+        do {
+            _ = try await first.rebuildPeople()
+            XCTFail("Expected a failure")
+        } catch {
+            XCTAssertEqual((error as? FeedHTTPError)?.status, 500)
+        }
+        clock.advance(2)
+        network.change { $0.failList = false }
+        let (second, server) = make(network, clock: clock)
+        let retried = try await second.rebuildPeople()
+        XCTAssertEqual(retried.file?.people.map(\.id), [10])
+        XCTAssertEqual(listReads(server), 1)
     }
 
     func testAFailedListKeepsTheOldOne() async throws {

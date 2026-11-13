@@ -239,6 +239,8 @@ try {
   check("first run shows only Fatline and Continue", (await inRail(text)).replace(/\s+/g, " ").trim() === "Fatline Continue", await inRail(text));
   const hiddenState = `[...document.querySelectorAll('[data-testid=sidebarColumn] section')].map((s) => getComputedStyle(s).visibility).join()`;
   check("X's widgets are hidden and search stays", (await until(async () => (await evaluate(pageSession, hiddenState)) === "hidden,hidden", "hidden widgets")) && (await evaluate(pageSession, "getComputedStyle(document.querySelector('form[role=search]')).visibility")) === "visible");
+  const frameSource = await evaluate(pageSession, `document.querySelector('[data-testid=sidebarColumn] iframe').src`);
+  check("the page sees a per-session address, not the extension's ID", frameSource.startsWith("chrome-extension://") && !frameSource.includes(extensionId), frameSource);
 
   await shot("1-first-run", pageSession);
 
@@ -438,7 +440,15 @@ try {
   await until(async () => (await inRail(text)).includes("Signed in"), "Settings");
   await shot("8-settings", pageSession);
   const settings = await inRail(text);
-  check("Settings matches the Mac", ["tester", "Signed in", "People", "Connection", "Custom Server", "Fatline 0.1.0", "Sign Out"].every((needle) => settings.includes(needle)), settings);
+  check("Settings matches the Mac", ["tester", "Signed in", "People", "Connection", "Custom Server", "Copy Diagnostics", "Fatline 0.1.0", "Sign Out"].every((needle) => settings.includes(needle)), settings);
+  await inRail(`window.__copied = []; navigator.clipboard.writeText = async (value) => { window.__copied.push(value); }; true`);
+  await inRail(click("Copy Diagnostics"));
+  await until(async () => (await inRail(text)).includes("Copied"), "Copied");
+  const diagnostics = await inRail(`window.__copied.join('|')`);
+  const expected = [/^Fatline 0\.1\.0, \S.* \d/, /\nConnection Custom Server\n/, `\nAccount FID ${FID}\n`, "\nRefreshes, newest first:\n", /\n\S+Z sign-in \d+\.\ds /];
+  const leaked = ["See example.com/page", "Hello from Chrome", "Retry this one", "keep this"];
+  check("Copy Diagnostics copies the report, without cast text", expected.every((needle) => (typeof needle === "string" ? diagnostics.includes(needle) : needle.test(diagnostics))) && !leaked.some((needle) => diagnostics.includes(needle)), diagnostics);
+  await until(async () => (await inRail(text)).includes("Copy Diagnostics"), "the label to return", 5000);
   await inRail(click("People"));
   await until(async () => (await inRail(text)).includes("To change who you follow"), "People");
   await shot("9-people", pageSession);

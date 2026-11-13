@@ -1,0 +1,33 @@
+{
+  "name": "fatline-network",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The server for private Fatline networks, and a scripted client that signs what the apps will send.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "demo": "node client/demo.ts",
+    "demo:phone": "node client/phone-demo.ts",
+    "real": "node client/real.ts",
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/server",
+    "client": "node client/cli.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "viem": "2.57.16"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261103.1",
+    "@farcaster/core": "0.21.0",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "wrangler": "4.156.1"
+  }
+}

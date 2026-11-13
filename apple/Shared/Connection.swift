@@ -77,7 +77,7 @@ struct Connection: Hashable, Sendable {
     private static var buildOverride: Connection? {
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment
-        if let invite = environment["FATLINE_INVITE"].flatMap(Invite.init(typed:)) { return .invite(invite) }
+        if let invite = environment["FATLINE_INVITE"].flatMap { Invite(typed: $0) } { return .invite(invite) }
         if let key = environment["FATLINE_NEYNAR_KEY"], !key.isEmpty { return .neynar(key: key) }
         if let server = environment["FATLINE_SERVER_URL"], let url = URL(string: server) { return .custom(url) }
         #endif
@@ -119,20 +119,50 @@ struct Connection: Hashable, Sendable {
 }
 
 /// A code and the server that accepts it, written as `code@server.example`. The server may have a port
-/// or a path, as in `code@server.example:8443/fatline`.
+/// or a path, as in `code@server.example:8443/fatline`. A build can name a default server, and then a
+/// code on its own goes there.
 struct Invite: Codable, Hashable, Sendable {
     let code: String
     let server: URL
 
     private static let codeCharacters = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
+    /// Where a code typed on its own goes, from the build setting `FATLINE_DEFAULT_SERVER`. It's empty
+    /// unless a build sets it, and then every code has to name its server.
+    static let defaultServer: URL? = {
+        guard let text = Bundle.main.object(forInfoDictionaryKey: "FatlineDefaultServer") as? String, !text.isEmpty else { return nil }
+        return ConnectionChoice.httpsServer(text)
+    }()
+
     /// Nil for anything that isn't exactly one safe code and one HTTPS server.
-    init?(typed text: String) {
+    init?(typed text: String, defaultServer: URL? = Invite.defaultServer) {
         let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "@", omittingEmptySubsequences: false)
-        guard parts.count == 2, (1...128).contains(parts[0].count), parts[0].allSatisfy(Self.codeCharacters.contains),
-              let server = ConnectionChoice.httpsServer(String(parts[1])) else { return nil }
+        guard (1...2).contains(parts.count), (1...128).contains(parts[0].count), parts[0].allSatisfy(Self.codeCharacters.contains),
+              let server = parts.count == 2 ? ConnectionChoice.httpsServer(String(parts[1])) : defaultServer else { return nil }
         code = String(parts[0])
         self.server = server
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case code, server
+    }
+
+    /// Lets a test decode as a build with a default server would.
+    static let defaultServerKey = CodingUserInfoKey(rawValue: "FatlineDefaultServer")!
+
+    /// Builds with a default server used to save the code alone, so that still means the default server.
+    init(from decoder: any Decoder) throws {
+        if let saved = try? decoder.singleValueContainer().decode(String.self) {
+            let defaultServer = decoder.userInfo[Self.defaultServerKey] as? URL ?? Self.defaultServer
+            guard let invite = Invite(typed: saved, defaultServer: defaultServer) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "A code with no server"))
+            }
+            self = invite
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decode(String.self, forKey: .code)
+        server = try container.decode(URL.self, forKey: .server)
     }
 
     /// The server as it's shown to the person, so they can see who they're trusting.

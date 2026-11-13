@@ -5,6 +5,19 @@ import type { FeedReader, Person, Read } from "./feedReader.ts";
 
 export type Problem = "paused" | "unreachable" | "refused" | "limitReached";
 
+/**
+ * One feed refresh, as reported by Copy Diagnostics. It holds counts, ages, and a public cast hash,
+ * and never cast text or anything related to keys.
+ */
+export interface RefreshRecord {
+  reason: string;
+  /** Unix milliseconds. */
+  started: number;
+  seconds: number;
+  outcome: string;
+  newestOwnCast: string | null;
+}
+
 /** Everything kept for one account. It's stored whole, because a service worker can stop at any time. */
 export interface FeedState {
   source?: string;
@@ -24,6 +37,8 @@ export interface FeedState {
   deleted: Record<string, number>;
   /** The node can accept a cast before a read returns it. Each stays here until one does. */
   held: { cast: FeedCast; added: number }[];
+  /** Newest first. Saved, because the worker usually stops between a refresh and Copy Diagnostics. */
+  history?: RefreshRecord[];
 }
 
 export const emptyFeedState = (): FeedState => ({ hasList: false, casts: [], latestSeen: 0, hidden: [], ownPosts: [], deleted: {}, held: [] });
@@ -40,8 +55,22 @@ const WINDOW_SECONDS = 7 * 24 * 60 * 60;
 const MAX_CASTS = 1000;
 const POST_HOLD = 120;
 const AVATAR_EVERY = 24 * 60 * 60;
+const HISTORY_LIMIT = 8;
 
-export const newer = (left: FeedCast, right: FeedCast) =>
+/** Like Swift's ISO8601Format(), which leaves out fractions of a second. */
+const isoTime = (milliseconds: number) => new Date(milliseconds).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/** Only the kind of failure, since an error's message can quote what the server sent. */
+function describeError(error: unknown): string {
+  if (error instanceof FeedHTTPError) return `HTTP ${error.status}`;
+  if (error instanceof Error) return error.name;
+  return typeof error;
+}
+
+const recordLine = (record: RefreshRecord) =>
+  `${isoTime(record.started)} ${record.reason} ${record.seconds.toFixed(1)}s ${record.outcome}${record.newestOwnCast ? `, yours ${record.newestOwnCast}` : ""}`;
+
+export const newer =(left: FeedCast, right: FeedCast) =>
   left.time === right.time ? (left.hash < right.hash ? -1 : 1) : right.time - left.time;
 
 export interface FeedModelOptions {
@@ -74,8 +103,12 @@ export class FeedModel {
     this.options = options;
   }
 
+  private get nowMilliseconds() {
+    return this.options.now?.() ?? Date.now();
+  }
+
   private get nowSeconds() {
-    return Math.floor((this.options.now?.() ?? Date.now()) / 1000);
+    return Math.floor(this.nowMilliseconds / 1000);
   }
 
   private isDue(last: number | undefined, gap: number) {
@@ -250,21 +283,50 @@ export class FeedModel {
   }
 
   private async read(reason: string) {
+    const started = this.nowMilliseconds;
+    const lastRead = this.state.lastRead;
+    let outcome: string;
     try {
       const age = await this.fetchLatest(reason);
       this.state.checkedAt = this.nowSeconds - age;
       this.problem = age >= STALE_AFTER_SECONDS && this.people.length > 0 ? "paused" : null;
       this.releaseHeld();
       if (reason === PEOPLE_BUTTON) this.peopleRefreshFailed = false;
+      outcome = `${this.state.lastRead !== lastRead ? `updated ${this.state.casts.length} casts` : "unchanged"}, age ${age}s`;
     } catch (error) {
       if (reason === PEOPLE_BUTTON) this.peopleRefreshFailed = true;
       else this.problem = this.problemFor(error);
+      outcome = `failed: ${describeError(error)}`;
     }
     await this.readOwnAvatar();
     this.state.lastRefresh = this.nowSeconds;
     this.prune();
+    const record = { reason, started, seconds: (this.nowMilliseconds - started) / 1000, outcome, newestOwnCast: this.newestOwnCast };
+    this.state.history = [record, ...(this.state.history ?? [])].slice(0, HISTORY_LIMIT);
     await this.persist();
     this.options.changed();
+  }
+
+  private get newestOwnCast(): string | null {
+    const cast = this.state.casts.filter((candidate) => candidate.fid === this.options.fid).sort(newer)[0];
+    return cast ? `${cast.hash.slice(0, 10)} at ${isoTime(cast.time * 1000)}` : null;
+  }
+
+  /** Text someone can paste into a bug report. See `RefreshRecord` for what it may contain. */
+  diagnostics(about: { app: string; connection: string }): string {
+    const history = this.state.history ?? [];
+    return [
+      about.app,
+      `Now ${isoTime(this.nowMilliseconds)}`,
+      `Connection ${about.connection}`,
+      `Account FID ${this.options.fid}`,
+      `People ${this.people.length}, hidden ${this.state.hidden.length}`,
+      `Casts in feed ${this.casts.length}, problem ${this.problem ?? "none"}`,
+      `Last checked ${this.state.checkedAt === undefined ? "never" : isoTime(this.state.checkedAt * 1000)}`,
+      `Refreshing ${this.loading ? "yes" : "no"}, save failed ${this.saveFailed ? "yes" : "no"}`,
+      "Refreshes, newest first:",
+      ...(history.length === 0 ? ["none yet"] : history.map(recordLine)),
+    ].join("\n");
   }
 
   private async readOwnAvatar() {

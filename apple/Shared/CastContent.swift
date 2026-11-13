@@ -69,7 +69,11 @@ enum CastImages {
         return URLSession(configuration: configuration, delegate: Redirects(), delegateQueue: nil)
     }()
 
-    private static func key(_ url: URL, _ maxPixels: Int) -> String { "\(maxPixels) \(url.absoluteString)" }
+    /// A network's picture links change each hour, so its pictures are kept by host, ID, and size instead.
+    private static func key(_ url: URL, _ maxPixels: Int) -> String {
+        if url.path().hasPrefix("/media/"), let host = url.host() { return "\(maxPixels) \(host):\(url.port ?? 0)\(url.path())" }
+        return "\(maxPixels) \(url.absoluteString)"
+    }
 
     static func cached(_ url: URL, maxPixels: Int) -> CGImage? {
         memory.object(forKey: key(url, maxPixels) as NSString)?.image
@@ -95,7 +99,10 @@ enum CastImages {
 
     /// Reads as it goes, so a huge file is dropped at the limit instead of filling memory first.
     nonisolated private static func download(_ url: URL, session: URLSession) async -> Data? {
-        guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
+        var request = URLRequest(url: url)
+        // A network serves smaller AVIF or WebP files to devices that ask for them.
+        if url.path().hasPrefix("/media/") { request.setValue("image/avif,image/webp,image/*;q=0.8", forHTTPHeaderField: "accept") }
+        guard let (bytes, response) = try? await session.bytes(for: request) else { return nil }
         defer { bytes.task.cancel() }
         guard (response as? HTTPURLResponse)?.statusCode == 200, response.expectedContentLength <= maxDownloadBytes else { return nil }
         var data = Data()
@@ -110,13 +117,20 @@ enum CastImages {
         return data
     }
 
+    /// Whether a picture's stated size is small enough to decode: both sides set, and the pixel count
+    /// within the limit. Sizes can claim nearly 2³² a side, so a product that wraps around fails too.
+    nonisolated static func acceptsSize(width: Int, height: Int) -> Bool {
+        let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
+        return !overflow && width > 0 && height > 0 && pixels <= maxSourcePixels
+    }
+
     nonisolated static func decode(_ data: Data, maxPixels: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               let type = CGImageSourceGetType(source), formats.contains(type as String),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              width.multipliedReportingOverflow(by: height).partialValue <= maxSourcePixels else { return nil }
+              acceptsSize(width: width, height: height) else { return nil }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

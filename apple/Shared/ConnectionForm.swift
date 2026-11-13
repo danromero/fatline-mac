@@ -23,7 +23,7 @@ enum ConnectionKind: CaseIterable, Hashable {
     fileprivate var instruction: String {
         switch self {
         case .neynar: "Paste your Neynar API key."
-        case .code: "Enter the code and server you were given."
+        case .code: Invite.defaultServer == nil ? "Enter the code and server you were given." : "Enter the code you were given."
         case .custom: "Enter your server’s HTTPS base URL."
         }
     }
@@ -47,44 +47,18 @@ enum ConnectionKind: CaseIterable, Hashable {
     fileprivate var malformed: String {
         switch self {
         case .neynar: "Invalid key."
-        case .code: "Use the format code@server.example."
+        case .code: Invite.defaultServer == nil ? "Use the format code@server.example." : "Invalid code."
         case .custom: "Enter an HTTPS URL."
         }
     }
 }
 
-/// What someone signed out sees: the splash, how to connect, then their recovery phrase.
-struct WelcomeFlow<SignIn: View>: View {
-    private enum Step: Hashable {
-        case connection(ConnectionKind), signIn
-    }
-
+/// The first screen: the portal, Fatline, and Continue.
+struct WelcomeSplash: View {
     let session: PostingSession
-    @ViewBuilder let signIn: () -> SignIn
-
-    @State private var path: [Step] = []
+    let next: () -> Void
 
     var body: some View {
-        NavigationStack(path: $path) {
-            splash
-                .navigationDestination(for: Step.self) { step in
-                    switch step {
-                    case .connection(let kind):
-                        ConnectionForm(setup: kind, saved: session.savedConnection) { other in
-                            path.append(.connection(other))
-                        } finish: { choice in
-                            try session.useConnection(choice)
-                            path.append(.signIn)
-                        }
-                    case .signIn:
-                        signIn()
-                    }
-                }
-        }
-        .tint(FatlineStyle.action)
-    }
-
-    private var splash: some View {
         VStack(spacing: 16) {
             Image("Portal")
                 .resizable()
@@ -110,7 +84,7 @@ struct WelcomeFlow<SignIn: View>: View {
             Button {
                 Platform.haptic(.tap)
                 session.recoveryError = nil
-                path = [Connection.isSetByLaunch ? .signIn : .connection(.neynar)]
+                next()
             } label: {
                 Text("Continue").frame(maxWidth: .infinity)
             }
@@ -331,10 +305,10 @@ struct ConnectionForm: View {
         Group {
             switch kind {
             case .code:
-                TextField("Code", text: $code, prompt: placeholder("CODE@server.example"))
+                TextField("Code", text: $code, prompt: placeholder(Invite.defaultServer == nil ? "CODE@server.example" : "XXXX-XXXX-XXXX"))
                     #if os(iOS)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
+                    .keyboardType(Invite.defaultServer == nil ? .emailAddress : .asciiCapable)
+                    .textInputAutocapitalization(Invite.defaultServer == nil ? .never : .characters)
                     #endif
                     .accessibilityLabel("Code")
             case .neynar:

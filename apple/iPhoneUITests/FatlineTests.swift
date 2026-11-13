@@ -14,6 +14,10 @@ final class FatlineTests: XCTestCase {
         XCTAssertEqual(app.buttons.count, 1)
         attachScreenshot("Welcome", app: app)
         app.buttons["welcome-continue"].tap()
+        // Get started leads with Farcaster.
+        let farcaster = app.buttons["setup-continue"]
+        XCTAssertTrue(farcaster.waitForExistence(timeout: 5))
+        farcaster.tap()
         let entry = app.descendants(matching: .any)["recovery-phrase-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Import your account"].exists)
@@ -96,6 +100,10 @@ final class FatlineTests: XCTestCase {
         let bottomOfContinue = start.frame.maxY
         attachScreenshot("Splash", app: app)
         start.tap()
+        // Get started leads with Farcaster.
+        let farcaster = app.buttons["setup-continue"]
+        XCTAssertTrue(farcaster.waitForExistence(timeout: 5))
+        farcaster.tap()
 
         XCTAssertTrue(app.staticTexts["Connect to Farcaster"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Paste your Neynar API key."].exists)

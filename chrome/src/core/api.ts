@@ -73,6 +73,7 @@ export interface Api {
   deleteCast(hash: string): void;
   checkKeyIfDue(): void;
   signOut(): void;
+  diagnostics(): string;
   openSetup(page: "start" | "connection"): void;
   setupState(): SetupState;
   useConnection(choice: ConnectionChoice): string | null;

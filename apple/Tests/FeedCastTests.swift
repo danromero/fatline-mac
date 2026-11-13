@@ -10,6 +10,64 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertFalse(UpdateCheck.isNewer("0.1.1", than: "0.1.1"))
         XCTAssertFalse(UpdateCheck.isNewer("0.1.0", than: "0.1.1"))
     }
+
+    func testPublicBuildsIgnoreThePilotFeed() {
+        XCTAssertEqual(UpdateCheck.offer(current: "0.3.0", publicVersion: "0.3.1", pilotVersion: "0.3.91", isPilot: false),
+                       .init(version: "0.3.1", fromPilot: false, required: false))
+        XCTAssertNil(UpdateCheck.offer(current: "0.3.0", publicVersion: "0.3.0", pilotVersion: "0.3.91", isPilot: false))
+    }
+
+    func testPilotBuildsTakeNewerPilotsUntilAPublicReleasePassesThem() {
+        XCTAssertEqual(UpdateCheck.offer(current: "0.3.90", publicVersion: "0.3.0", pilotVersion: "0.3.91", isPilot: true),
+                       .init(version: "0.3.91", fromPilot: true, required: false))
+        XCTAssertNil(UpdateCheck.offer(current: "0.3.91", publicVersion: "0.3.0", pilotVersion: "0.3.91", isPilot: true))
+        XCTAssertNil(UpdateCheck.offer(current: "0.3.91", publicVersion: nil, pilotVersion: nil, isPilot: true))
+        // Public fixes numbered below the pilots are never offered to them.
+        XCTAssertNil(UpdateCheck.offer(current: "0.3.91", publicVersion: "0.3.2", pilotVersion: nil, isPilot: true))
+    }
+
+    func testPilotBuildsHaveToUpdateOnceAPublicReleaseIsNewer() {
+        XCTAssertEqual(UpdateCheck.offer(current: "0.3.91", publicVersion: "0.4.0", pilotVersion: "0.3.91", isPilot: true),
+                       .init(version: "0.4.0", fromPilot: false, required: true))
+        XCTAssertEqual(UpdateCheck.offer(current: "0.3.91", publicVersion: "0.4.0", pilotVersion: nil, isPilot: true),
+                       .init(version: "0.4.0", fromPilot: false, required: true))
+        // Same version in both places: the public one.
+        XCTAssertEqual(UpdateCheck.offer(current: "0.3.91", publicVersion: "0.4.0", pilotVersion: "0.4.0", isPilot: true),
+                       .init(version: "0.4.0", fromPilot: false, required: true))
+        // A newer pilot still installs, but the switch is required.
+        XCTAssertEqual(UpdateCheck.offer(current: "0.2.9", publicVersion: "0.3.0", pilotVersion: "0.3.91", isPilot: true),
+                       .init(version: "0.3.91", fromPilot: true, required: true))
+    }
+
+    func testNetworkRequestsNameTheMacBuild() {
+        XCTAssertTrue(NetworkClient.appHeader.hasPrefix("mac/"))
+        XCTAssertNotEqual(NetworkClient.appHeader, "mac/0")
+    }
+
+    func testCopiesAppFromDiskImageAndDetachesIt() throws {
+        let files = FileManager.default
+        let folder = files.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? files.removeItem(at: folder) }
+        let source = folder.appending(path: "source", directoryHint: .isDirectory)
+        let contents = source.appending(path: "Fatline.app/Contents", directoryHint: .isDirectory)
+        try files.createDirectory(at: contents, withIntermediateDirectories: true)
+        try Data("marker".utf8).write(to: contents.appending(path: "marker"))
+
+        let image = folder.appending(path: "Fatline.dmg")
+        let create = Process()
+        create.executableURL = URL(filePath: "/usr/bin/hdiutil")
+        create.arguments = ["create", "-quiet", "-volname", "Fatline", "-srcfolder", source.path, "-fs", "APFS", "-format", "ULFO", image.path]
+        try create.run()
+        create.waitUntilExit()
+        XCTAssertEqual(create.terminationStatus, 0)
+
+        let mount = folder.appending(path: "mount")
+        let copied = folder.appending(path: "Fatline.app")
+        try UpdateCheck.copyApp(fromDiskImage: image, mountingAt: mount, to: copied)
+
+        XCTAssertEqual(try Data(contentsOf: copied.appending(path: "Contents/marker")), Data("marker".utf8))
+        XCTAssertFalse(files.fileExists(atPath: mount.appending(path: "Fatline.app").path))
+    }
 }
 #endif
 
@@ -341,7 +399,7 @@ final class FeedRefreshTests: XCTestCase {
         let fails = Counter()
         let model = FeedModel(directory: directory(), fetchFeed: { _, _ in Self.fetch(["0xa"]) }, fetchPeople: {
             await fails.add()
-            if await fails.count == 1 { throw FeedHTTPError(status: 429) }
+            if await fails.count == 1 { throw FeedHTTPError(status: 503) }
             return Self.listed([Self.v])
         })
         await model.start()
@@ -387,19 +445,6 @@ final class FeedRefreshTests: XCTestCase {
         XCTAssertEqual(model.people, [])
         await model.refresh(reason: "pull")
         XCTAssertEqual(model.people, [Self.v])
-    }
-
-    func testRecheckingAnEmptyListTooSoonIsntAProblem() async {
-        let lists = Counter()
-        let model = FeedModel(directory: directory(), fetchFeed: { _, _ in Self.listed([]) }, fetchPeople: {
-            await lists.add()
-            if await lists.count > 1 { throw FeedHTTPError(status: 429) }
-            return Self.listed([])
-        })
-        await model.start(signedIn: true)
-        await model.refresh(reason: "pull")
-        XCTAssertNil(model.problem)
-        XCTAssertEqual(model.people, [])
     }
 
     func testAFailedRecheckOfAnEmptyListShowsAProblem() async {
@@ -504,6 +549,17 @@ final class FeedRefreshTests: XCTestCase {
         XCTAssertTrue(text.contains("yours 0xcached"), text)
         XCTAssertTrue(text.contains("Account FID 3"), text)
         XCTAssertFalse(text.contains("secret words"), text)
+    }
+
+    func testDiagnosticsKeepRefreshesFromBeforeARelaunch() async {
+        let folder = directory()
+        let first = FeedModel(directory: folder) { _, _ in throw FeedHTTPError(status: 503) }
+        await first.refresh(reason: "launch")
+        let second = FeedModel(directory: folder) { _, _ in Self.fetch() }
+        await second.start()
+        let text = second.diagnostics
+        XCTAssertTrue(text.contains("failed: HTTP 503"), text)
+        XCTAssertTrue(text.contains("updated 0 casts"), text)
     }
 
     func testDiagnosticsKeepRecentRefreshesOnly() async {

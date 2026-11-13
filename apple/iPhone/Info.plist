@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>FatlineDefaultServer</key>
+    <string>$(FATLINE_DEFAULT_SERVER)</string>
+    <key>FatlineBuildFeed</key>
+    <string>$(FATLINE_BUILD_FEED)</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>UIAppFonts</key>

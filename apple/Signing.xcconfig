@@ -2,5 +2,12 @@
 // Signing.local.xcconfig, which Git ignores, and set your own values there.
 DEVELOPMENT_TEAM =
 FATLINE_BUNDLE_ID = com.example.fatline
+// A server that codes go to when they don't name one, such as api.example.com. Empty means none.
+FATLINE_DEFAULT_SERVER =
+// Where TestFlight builds of the iPhone app check for a newer build, once a day. Empty means never.
+FATLINE_BUILD_FEED =
+// Mac pilot builds only: a feed of newer pilot builds, with Fatline.dmg beside it. Pilot builds also have to
+// update once a public release is newer. Empty means a public build.
+FATLINE_PILOT_FEED =
 
 #include? "Signing.local.xcconfig"

@@ -31,6 +31,23 @@ jobs:
         if: env.SERVER_URL != '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         run: ./check.sh "$SERVER_URL"
 
+  network:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: network
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: network/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx wrangler deploy --dry-run
+
   chrome:
     runs-on: ubuntu-latest
     defaults:

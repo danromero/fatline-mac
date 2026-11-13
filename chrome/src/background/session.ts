@@ -44,6 +44,24 @@ function signerFor(account: StoredAccount): Signer {
 
 const postedCast = (cast: SignedCast): FeedCast => ({ hash: cast.hash, fid: cast.fid, time: 1_609_459_200 + cast.timestamp, text: cast.text });
 
+/** The extension's name and version, as Settings and Copy Diagnostics show them. */
+const versionLine = () => `Fatline ${chrome.runtime.getManifest().version}`;
+
+interface UserAgentData {
+  getHighEntropyValues(hints: string[]): Promise<{ platform?: string; platformVersion?: string; fullVersionList?: { brand: string; version: string }[] }>;
+}
+
+/** The browser and system, for Copy Diagnostics. */
+async function systemLine(): Promise<string> {
+  try {
+    const data = await (navigator as { userAgentData?: UserAgentData }).userAgentData!.getHighEntropyValues(["platformVersion", "fullVersionList"]);
+    const browser = data.fullVersionList?.find((entry) => entry.brand === "Google Chrome") ?? data.fullVersionList?.find((entry) => entry.brand === "Chromium");
+    return `${browser ? `${browser.brand} ${browser.version}` : "Chrome"}, ${data.platform} ${data.platformVersion}`;
+  } catch {
+    return navigator.userAgent;
+  }
+}
+
 /** The signed-in account and everything done with it. A retry has to resend the exact signed bytes. */
 export class Session {
   private account: StoredAccount | undefined;
@@ -136,8 +154,14 @@ export class Session {
       lastChecked: model?.lastChecked ?? null,
       saveFailed: model?.saveFailed ?? false,
       signOutBlock: this.signOutBlock,
-      version: `Fatline ${chrome.runtime.getManifest().version}`,
+      version: versionLine(),
     };
+  }
+
+  async diagnostics(): Promise<string> {
+    await this.ready;
+    if (!this.model || !this.connection) throw new PostingError("unavailable");
+    return this.model.diagnostics({ app: `${versionLine()}, ${await systemLine()}`, connection: this.connection.name });
   }
 
   /** The first read after a sign-in also reads who the account follows. */

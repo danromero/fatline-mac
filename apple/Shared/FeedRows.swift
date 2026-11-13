@@ -122,6 +122,7 @@ private struct CastLinkHotspots: ViewModifier {
 private struct CastAvatar: View {
     let url: URL?
     let handle: String
+    var background = FatlineStyle.quiet
     @State private var loaded: CGImage?
 
     private static let maxPixels = 128
@@ -141,7 +142,7 @@ private struct CastAvatar: View {
             }
         }
         .frame(width: FatlineStyle.avatarSize, height: FatlineStyle.avatarSize)
-        .background(FatlineStyle.quiet)
+        .background(background)
         .clipShape(.circle)
         .task(id: url) {
             guard let url else { return }
@@ -180,7 +181,7 @@ private struct CastPicture: View {
                                 .scaledToFit()
                         }
                     }
-                    .clipShape(.rect(cornerRadius: 10))
+                    .clipShape(.rect(cornerRadius: FatlineStyle.cardRadius))
                     .contentShape(.rect)
             }
         }
@@ -204,6 +205,12 @@ private struct CastPicture: View {
 struct CastRow: View {
     let cast: FeedCast
     let handle: String
+    /// What the author did, after their name, as in "@alice replied".
+    var action: String? = nil
+    /// Zero when something sits under the row's text, like reply and like.
+    var bottomInset = FatlineStyle.rowPadding
+    /// While the row's menu is open.
+    var highlighted = false
 
     /// On a Mac the links inside a cast's text are separate controls, which combining would hide.
     private var hasTextLinks: Bool {
@@ -218,13 +225,12 @@ struct CastRow: View {
         let links = cast.webLinks
         let images = cast.imageURLs
         HStack(alignment: .top, spacing: FatlineStyle.avatarGap) {
-            CastAvatar(url: cast.avatarURL, handle: handle)
+            CastAvatar(url: cast.avatarURL, handle: handle, background: highlighted ? FatlineStyle.paper : FatlineStyle.quiet)
                 .padding(.top, FatlineStyle.avatarTopInset)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: FatlineStyle.castGap) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: handle)
-                        .font(FatlineStyle.bodyStrong)
+                    header
                         .frame(maxWidth: .infinity, alignment: .leading)
                     CastTime(cast: cast)
                 }
@@ -270,22 +276,45 @@ struct CastRow: View {
             }
         }
         .padding(.horizontal, FatlineStyle.gutter)
-        .padding(.vertical, FatlineStyle.rowPadding)
+        .padding(.top, FatlineStyle.rowPadding)
+        .padding(.bottom, bottomInset)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The long-press preview lifts the row off the feed, so it carries the feed's paper with it.
-        .background(FatlineStyle.paper)
+        .background(highlighted ? FatlineStyle.quiet : FatlineStyle.paper)
         .contentShape(.rect)
         .accessibilityElement(children: links.isEmpty && images.isEmpty && !hasTextLinks ? .combine : .contain)
+    }
+
+    /// The name, bold, and what they did, in regular weight. One text, so a long line wraps as a sentence.
+    private var header: Text {
+        let name = Text(verbatim: handle).font(FatlineStyle.bodyStrong)
+        guard let action else { return name }
+        return Text("\(name) \(Text(action).font(FatlineStyle.body))")
     }
 }
 
 /// Stays above the feed until the problem clears, because a feed that's quietly old looks like a quiet
 /// day. Clicking or tapping it asks again. It uses the same columns as a cast row, with the mark where an avatar goes.
 struct FeedProblemBanner: View {
-    let problem: FeedModel.Problem
-    let lastChecked: Date?
+    private let title: String
+    private let detail: (Date) -> String
     let checking: Bool
     let retry: () -> Void
+
+    init(problem: FeedModel.Problem, lastChecked: Date?, checking: Bool, retry: @escaping () -> Void) {
+        title = Self.title(problem)
+        detail = { Self.detail(problem, lastChecked: lastChecked, now: $0) }
+        self.checking = checking
+        self.retry = retry
+    }
+
+    /// A network's problem: what went wrong, and how old the posts showing are.
+    init(message: String, lastRead: Date?, checking: Bool, retry: @escaping () -> Void) {
+        title = message
+        detail = { now in (lastRead.map { "Showing posts from \(Self.age(now.timeIntervalSince($0))) ago. " } ?? "") + "\(Platform.pressVerb) to try again." }
+        self.checking = checking
+        self.retry = retry
+    }
 
     var body: some View {
         Button(action: retry) {
@@ -301,7 +330,7 @@ struct FeedProblemBanner: View {
                         .font(FatlineStyle.bodyStrong)
                         .foregroundStyle(FatlineStyle.ink)
                     TimelineView(.periodic(from: .now, by: 30)) { context in
-                        Text(checking ? "Checking…" : detail(now: context.date))
+                        Text(checking ? "Checking…" : detail(context.date))
                             .font(FatlineStyle.meta)
                             .foregroundStyle(FatlineStyle.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -321,7 +350,7 @@ struct FeedProblemBanner: View {
         .accessibilityIdentifier("feed-problem")
     }
 
-    private var title: String {
+    private static func title(_ problem: FeedModel.Problem) -> String {
         switch problem {
         case .paused, .limitReached: "Feed paused"
         case .unreachable: "Can’t reach the server"
@@ -329,7 +358,7 @@ struct FeedProblemBanner: View {
         }
     }
 
-    private func detail(now: Date) -> String {
+    private static func detail(_ problem: FeedModel.Problem, lastChecked: Date?, now: Date) -> String {
         let age = lastChecked.map { Self.age(now.timeIntervalSince($0)) }
         switch problem {
         case .paused:
@@ -377,11 +406,12 @@ struct FeedMarker: View {
 /// A status line inside a list. It starts on the same column as cast text.
 struct FeedMessage: View {
     let text: String
+    var color = FatlineStyle.secondary
 
     var body: some View {
         Text(text)
             .font(FatlineStyle.meta)
-            .foregroundStyle(FatlineStyle.secondary)
+            .foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, FatlineStyle.textColumn)
             .padding(.trailing, FatlineStyle.gutter)

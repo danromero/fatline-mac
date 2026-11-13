@@ -31,6 +31,17 @@ enum PostingKeychain {
     static func save(_ account: PostingAccount) throws { try item.save(account) }
 }
 
+/// Debug builds opened with `-FatlineProfile <name>` keep their Keychain values and network
+/// settings under that name, so testing with made-up accounts leaves the usual ones alone.
+enum DevProfile {
+    static let suffix: String = {
+        #if DEBUG
+        if let name = UserDefaults.standard.string(forKey: "FatlineProfile"), !name.isEmpty { return "-\(name)" }
+        #endif
+        return ""
+    }()
+}
+
 /// One value in the device-only Keychain.
 struct KeychainValue<Value: Codable>: Sendable {
     let account: String
@@ -39,7 +50,7 @@ struct KeychainValue<Value: Codable>: Sendable {
         [
             kSecClass as String: kSecClassGenericPassword as String,
             kSecAttrService as String: Bundle.main.bundleIdentifier ?? "Fatline",
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account + E2EProfile.suffix + DevProfile.suffix,
             // The app gets the older file-based keychain unless it asks for this one, and only
             // this one honors device-only access.
             kSecUseDataProtectionKeychain as String: true

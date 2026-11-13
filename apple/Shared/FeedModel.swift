@@ -4,7 +4,7 @@ import os
 
 /// One feed refresh, as reported by Copy Diagnostics. It holds counts, ages, and a public cast hash,
 /// and never cast text or anything related to keys.
-struct FeedRefreshRecord: Sendable {
+struct FeedRefreshRecord: Codable, Sendable {
     let reason: String
     let started: Date
     let seconds: Double
@@ -34,12 +34,28 @@ struct FeedCast: Codable, Hashable, Identifiable, Sendable {
     var avatar: String? = nil
     /// Pictures attached to the cast. Video and other attachments are left out when it's read.
     var images: [String]? = nil
+    /// For a post in a Fatline network: the network's host, which serves its pictures itself.
+    var mediaHost: String? = nil
 
     var id: String { hash }
     var date: Date { Date(timeIntervalSince1970: TimeInterval(time)) }
 
-    var avatarURL: URL? { avatar.flatMap(Self.imageURL) }
-    var imageURLs: [URL] { (images ?? []).compactMap(Self.imageURL) }
+    var avatarURL: URL? { avatar.flatMap(picture) }
+    var imageURLs: [URL] { (images ?? []).compactMap(picture) }
+
+    private func picture(_ link: String) -> URL? {
+        if let mediaHost, let url = Self.networkMediaURL(link, host: mediaHost) { return url }
+        return Self.imageURL(link)
+    }
+
+    /// A picture a network serves from its own `/media/` path. A network on this computer, as when
+    /// testing, uses plain HTTP, as its API does.
+    static func networkMediaURL(_ link: String, host: String) -> URL? {
+        guard let url = URL(string: link), url.host(percentEncoded: false).map({ "\($0)\(url.port.map { ":\($0)" } ?? "")" }) == host,
+              url.path().hasPrefix("/media/") else { return nil }
+        let local = host.hasPrefix("localhost") || host.hasPrefix("127.0.0.1")
+        return url.scheme == (local ? "http" : "https") ? url : nil
+    }
 
     /// A picture's author chooses its address, so only HTTPS to a named public host is fetched. That
     /// keeps a cast from making this device call something on its own network.
@@ -172,6 +188,9 @@ final class FeedModel {
         var top: FeedPlace?
         /// The newest cast that has been on screen.
         var seen: FeedPlace?
+        /// The latest refreshes, newest first. They're saved so a relaunch or a change of connection
+        /// doesn't lose the one that went wrong.
+        var refreshes: [FeedRefreshRecord]?
     }
 
     private static let signIn = "sign-in"
@@ -191,12 +210,14 @@ final class FeedModel {
     private let fetchPeople: @Sendable () async throws -> FeedFetch
     private let fetchOwnAvatar: @Sendable () async throws -> String?
     private var snapshot = Snapshot()
+
+    /// This account's Farcaster picture, once read, which a network copies when this account joins it.
+    var ownAvatarLink: String? { snapshot.ownAvatar }
     private var didLoad = false
     private var lastRefresh: Date?
     private(set) var loading = false
     private var refreshTask: Task<Void, Never>?
     private var queuedRefreshReason: String?
-    private var history: [FeedRefreshRecord] = []
     private var saveFailed = false
     private(set) var problem: Problem?
     private(set) var refreshingPeople = false
@@ -458,12 +479,8 @@ final class FeedModel {
     /// has no list for gets one here, which covers a sign-in from before lists and a sign-in that failed.
     private func fetchLatest(reason: String) async throws -> FeedFetch {
         if Self.rebuildsPeople(reason) { return try await fetchPeople() }
-        // Following no one, the list is the only thing that can change. Asking again too soon isn't a problem.
-        if hasLoadedFeed, people.isEmpty {
-            do {
-                return try await fetchPeople()
-            } catch let error as FeedHTTPError where error.status == 429 {}
-        }
+        // Following no one, the list is the only thing that can change.
+        if hasLoadedFeed, people.isEmpty { return try await fetchPeople() }
         do {
             // An ETag without saved casts would get a 304 with nothing to show.
             let etag = snapshot.feedCasts == nil ? nil : snapshot.etag
@@ -499,11 +516,6 @@ final class FeedModel {
         await readOwnAvatar()
         lastRefresh = .now
         pruneOwnPosts()
-        do {
-            try persist(snapshot)
-            saveFailed = false
-        } catch { saveFailed = true }
-
         let record = FeedRefreshRecord(
             reason: reason,
             started: started,
@@ -511,8 +523,11 @@ final class FeedModel {
             outcome: outcome,
             newestOwnCast: newestOwnCast
         )
-        history.insert(record, at: 0)
-        history.removeLast(max(0, history.count - Self.historyLimit))
+        snapshot.refreshes = Array(([record] + (snapshot.refreshes ?? [])).prefix(Self.historyLimit))
+        do {
+            try persist(snapshot)
+            saveFailed = false
+        } catch { saveFailed = true }
         Self.logger.log("\(Self.line(for: record), privacy: .public)")
     }
 
@@ -581,6 +596,7 @@ final class FeedModel {
     /// Text someone can paste into a bug report. See `FeedRefreshRecord` for what it may contain.
     var diagnostics: String {
         let system = ProcessInfo.processInfo.operatingSystemVersion
+        let history = snapshot.refreshes ?? []
         let lines = [
             "\(Self.versionLine), \(Platform.systemName) \(system.majorVersion).\(system.minorVersion).\(system.patchVersion)",
             "Now \(Date.now.ISO8601Format())",

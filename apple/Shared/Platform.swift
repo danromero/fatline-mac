@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// A Debug build launched with `-FatlineE2E` keeps its sign-in, connection, and files apart from the
+/// ones saved on this device, so a test on the real network can never act as a real account.
+enum E2EProfile {
+    static var suffix: String {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-FatlineE2E") ? "-e2e" : ""
+        #else
+        ""
+        #endif
+    }
+}
+
 /// What differs between the iPhone and Mac apps, so shared code can stay the same for both.
 enum Platform {
     #if os(macOS)
@@ -24,9 +36,9 @@ enum Platform {
     /// with every other build, so Fatline and Fatline Dev each need their own folder there.
     static var appFolder: URL {
         #if os(macOS)
-        URL.applicationSupportDirectory.appending(path: Bundle.main.bundleIdentifier ?? "Fatline")
+        URL.applicationSupportDirectory.appending(path: (Bundle.main.bundleIdentifier ?? "Fatline") + E2EProfile.suffix)
         #else
-        URL.applicationSupportDirectory.appending(path: "Fatline")
+        URL.applicationSupportDirectory.appending(path: "Fatline" + E2EProfile.suffix)
         #endif
     }
 

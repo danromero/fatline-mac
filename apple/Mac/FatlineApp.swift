@@ -33,6 +33,9 @@ struct MenuFlags: Equatable {
     let signedIn: Bool
     let hasFeed: Bool
     let composing: Bool
+    /// The networks in the title menu, in order. Farcaster is ⌘1 and these follow.
+    var networks: [String] = []
+    var inNetwork = false
 }
 
 extension FocusedValues {
@@ -41,10 +44,13 @@ extension FocusedValues {
 
 extension View {
     func publishesMenuFlags(_ state: AppState) -> some View {
+        let network = state.networks.selected
         let flags = MenuFlags(
-            signedIn: state.session.account?.fid != nil,
-            hasFeed: state.model != nil,
-            composing: state.session.showComposer
+            signedIn: network.map { $0.status == .approved } ?? (state.session.account?.fid != nil),
+            hasFeed: network != nil || state.model != nil,
+            composing: state.session.showComposer || state.showNetworkComposer,
+            networks: state.networks.memberships.map(\.host),
+            inNetwork: network != nil
         )
         return focusedSceneValue(\.menuFlags, flags)
             .onChange(of: flags) { MenuFlags.refreshMenusSoon() }
@@ -82,21 +88,39 @@ private struct FatlineCommands: Commands {
                 .disabled(flags?.hasFeed != true)
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Cast", action: state.session.openComposer)
+            Button(flags?.inNetwork == true ? "New Post" : "New Cast", action: state.newPost)
                 .keyboardShortcut("n")
                 .disabled(flags?.signedIn != true || flags?.composing == true)
+            Button("Add Network…") { state.addingNetwork = true }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
         }
         CommandGroup(before: .toolbar) {
             Button("Refresh") {
-                Task { await state.model?.refresh(reason: "pull") }
+                Task {
+                    if state.networks.selected != nil { await state.networks.refresh() } else { await state.model?.refresh(reason: "pull") }
+                }
             }
             .keyboardShortcut("r")
             .disabled(flags?.hasFeed != true || flags?.composing == true)
             Divider()
+            if let networks = flags?.networks, !networks.isEmpty {
+                // Not while composing: a draft stays with the network it was written for.
+                Button("Farcaster") { state.networks.select(nil) }
+                    .keyboardShortcut("1")
+                    .disabled(flags?.composing == true)
+                ForEach(Array(networks.prefix(8).enumerated()), id: \.element) { index, host in
+                    Button(state.networks.memberships.first { $0.host == host }?.label ?? host) { state.networks.select(host) }
+                        .keyboardShortcut(KeyEquivalent(Character(String(index + 2))))
+                        .disabled(flags?.composing == true)
+                }
+                Divider()
+            }
         }
         CommandMenu("Debug") {
             Button("Copy Diagnostics", action: state.copyDiagnostics)
                 .disabled(flags?.hasFeed != true || flags?.composing == true)
+            Button("Forget Networks on This Mac") { state.networks.forgetEverything() }
+                .disabled((flags?.networks.isEmpty != false && state.networks.device == nil) || flags?.composing == true)
         }
         CommandGroup(replacing: .help) {}
     }
@@ -113,7 +137,15 @@ private struct FeedOwner: Equatable {
 @Observable
 final class AppState {
     let session = PostingSession()
+    let networks = NetworkModel()
     let menuBar = MenuBarIcon()
+    /// Add Network takes over the window, as setup does.
+    var addingNetwork = false
+    var showNetworkComposer = false
+    /// Replies and Activity, pushed over the network's feed.
+    var networkPath: [NetworkRoute] = []
+    /// While first-run setup shows, the title stays empty, even once a network is joined in it.
+    var settingUp = false
     /// Off until someone asks for it in Settings.
     var showsMenuBarIcon = UserDefaults.standard.bool(forKey: MenuBarIcon.shownKey) {
         didSet {
@@ -156,6 +188,29 @@ final class AppState {
         model = owner.map { FeedModel(directory: Self.accountFolder($0.fid), ownFID: $0.fid, ownHandle: username) }
     }
 
+    /// ⌘N and the plus: a post in the network that's showing, or a cast on Farcaster.
+    func newPost() {
+        if networks.selected != nil { showNetworkComposer = true } else { session.openComposer() }
+    }
+
+    /// Opens the network's admin pages in the browser, signed in through a one-time link.
+    func manageNetwork() {
+        Task {
+            do { NSWorkspace.shared.open(try await networks.adminLink()) } catch { networks.toast = error.localizedDescription }
+        }
+    }
+
+    func leaveNetwork() {
+        guard let selected = networks.selected else { return }
+        Task {
+            if selected.status == .approved {
+                do { try await networks.leave() } catch { networks.toast = error.localizedDescription }
+            } else {
+                networks.forget(selected.host)
+            }
+        }
+    }
+
     func copyDiagnostics() {
         guard let model else { return }
         Platform.copyToClipboard(model.diagnostics)
@@ -187,17 +242,32 @@ private struct AppRoot: View {
 
     var body: some View {
         Group {
-            if state.needsConnection, state.model != nil {
+            if state.addingNetwork {
+                AddNetworkFlow()
+            } else if let network = state.networks.selected {
+                NetworkWindow(membership: network)
+                    .id(network.host)
+            } else if state.needsConnection, state.model != nil {
                 ConnectionSetup(finish: state.session.useConnection)
             } else if let model = state.model {
                 FeedWindow(model: model)
                     .id(ObjectIdentifier(model))
             } else {
-                WelcomeFlow(session: state.session) { SignInView() }
+                GettingStarted(farcasterOnly: !state.networks.memberships.isEmpty)
             }
         }
         .publishesMenuFlags(state)
-        .feedTitleBar(showsPortal: state.model != nil && !state.needsConnection)
+        .feedTitleBar(showsPortal: !state.addingNetwork && !state.settingUp
+            && (state.networks.selected != nil || !state.networks.memberships.isEmpty || (state.model != nil && !state.needsConnection)))
+        .sheet(isPresented: Bindable(state).showNetworkComposer) { NetworkComposerSheet() }
+        .onChange(of: state.networks.selectedHost) { state.networkPath = [] }
+        // News in the networks that aren't showing, for the dots on the title and in its menu.
+        .task(id: state.networks.memberships.map(\.host)) {
+            while !Task.isCancelled {
+                await state.networks.checkOthers()
+                try? await Task.sleep(for: .seconds(NetworkModel.pollInterval))
+            }
+        }
         .onAppear { state.menuBar.start(state, openWindow: openWindow) }
         // Closing the feed quits even with Settings open, so no window outlives the account it shows.
         // With the menu bar icon on, closing only hides the window, so this never runs.

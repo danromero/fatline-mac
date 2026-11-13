@@ -2,8 +2,10 @@
  * Runs beside x.com, so it holds nothing. It finds X's rail on the home feed, puts the extension's frame
  * over it, and hides X's widgets only once that frame has said it loaded. If anything is off, X is untouched.
  */
+// The manifest's use_dynamic_url makes this address change every session, so pages can't guess it. The
+// frame still loads at the extension's own origin, so that's where its messages come from and go to.
 const FRAME_URL = chrome.runtime.getURL("rail.html");
-const FRAME_ORIGIN = new URL(FRAME_URL).origin;
+const FRAME_ORIGIN = `chrome-extension://${chrome.runtime.id}`;
 const READY_TIMEOUT_MS = 5000;
 const GAP = 12;
 const PLUS_SIZE = 48;

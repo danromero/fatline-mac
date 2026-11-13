@@ -77,11 +77,53 @@ enum FatlineStyle {
     static let screenGutter: CGFloat = 16
     static let screenTop: CGFloat = 12
     static let screenBottom: CGFloat = 12
+    /// The floating plus over a feed: its side and its gap to the bottom. A feed leaves `plusClearance`
+    /// under its last post, and its toast sits that far up, so neither is under the plus.
+    static let plusSize: CGFloat = 56
+    static let plusBottom: CGFloat = 20
+    static let plusClearance: CGFloat = 88
+    /// A sheet's header, such as the composer's, and the bar along its bottom.
+    static let sheetHeaderHeight: CGFloat = 56
+    static let sheetBarHeight: CGFloat = 52
+    /// Pictures in the composer are squares this size, and a link card beside one matches its height.
+    static let attachmentSide: CGFloat = 140
+    /// The × on an attachment: a circle this size in a 44-point target.
+    static let removeButtonSize: CGFloat = 24
+    /// Post pills are at least this wide, so Posting… doesn't move them.
+    static let postPillWidth: CGFloat = 72
+    /// Rows in Settings and lists like Members: a 44-point target with room above and below.
+    static let listRowHeight: CGFloat = 56
+    /// The picture on Your profile.
+    static let profilePictureSize: CGFloat = 64
     #endif
 
     // Grid: content runs from the gutter to the mirrored right gutter. Text in lists starts at textColumn.
     static let gutter: CGFloat = 16
     static let textColumn = gutter + avatarSize + avatarGap
+
+    // Inside a post: name to text, and text to whatever is under it.
+    static let castGap: CGFloat = 4
+    // Reply and like. Each has a slot of its own width, so the heart stays put with a count or without.
+    static let actionSlotWidth: CGFloat = 64
+    static let actionSlotHeight: CGFloat = 20
+    static let actionIconGap: CGFloat = 6
+    /// Below reply and like, so the icons end 11 above the divider like text does.
+    static let actionsBottom: CGFloat = 8
+    // Gaps in rows of controls and between a field and the controls under it.
+    static let itemGap: CGFloat = 8
+    static let groupGap: CGFloat = 12
+    /// Bars at the bottom of a window, above and below their controls.
+    static let barPadding: CGFloat = 12
+    static let fieldInset: CGFloat = 14
+    static let fieldRadius: CGFloat = 18
+    /// Link cards and pictures in posts.
+    static let cardRadius: CGFloat = 10
+    // Network marks: a rounded square with the network's first letter.
+    static let markRadiusRatio: CGFloat = 0.27
+    static let markLetterRatio: CGFloat = 0.55
+    /// The unread dot on a mark or the Activity button, with a paper ring so it reads on anything.
+    static let unreadDot: CGFloat = 7
+    static let unreadRing: CGFloat = 2
 
     // A symbol next to text takes that text's font. These are the exceptions: the glyphs that stand
     // alone as a control, and body-size marks in a fixed frame, which can't grow with Dynamic Type.
@@ -171,13 +213,13 @@ extension View {
 
     /// Keeps a step's main button in the same place from screen to screen.
     func fatlineBottomAction<Action: View>(
-        gutter: CGFloat = FatlineStyle.screenGutter, @ViewBuilder _ action: () -> Action
+        gutter: CGFloat = FatlineStyle.screenGutter, bottom: CGFloat = FatlineStyle.screenBottom, @ViewBuilder _ action: () -> Action
     ) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             action()
                 .padding(.horizontal, gutter)
                 .padding(.top, 12)
-                .padding(.bottom, FatlineStyle.screenBottom)
+                .padding(.bottom, bottom)
                 .frame(maxWidth: FatlineStyle.columnMaxWidth)
                 .frame(maxWidth: .infinity)
                 .background(FatlineStyle.paper)

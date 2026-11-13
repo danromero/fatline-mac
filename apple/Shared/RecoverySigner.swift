@@ -31,6 +31,16 @@ final class RecoverySigner {
         self.address = address
     }
 
+    /// Approves a Fatline network device key, as docs/NETWORK.md describes. Returns the 65-byte signature as hex.
+    func approveDevice(fid: UInt64, key: Curve25519.Signing.PrivateKey, issuedAt: Int64) throws -> String {
+        guard let signature = account.invokeMethod("approveDevice", withArguments: [
+            String(fid), key.publicKey.rawRepresentation.hex, issuedAt
+        ])?.toString(), context.exception == nil, Data(hex: signature)?.count == 65 else {
+            throw PostingError.rejected("Couldn’t approve this Mac’s key.")
+        }
+        return signature
+    }
+
     func registration(fid: UInt64, nonce: UInt32, key: Curve25519.Signing.PrivateKey) throws -> SignerRegistration {
         let ttl: UInt32 = 30 * 24 * 60 * 60
         let now = Date.now

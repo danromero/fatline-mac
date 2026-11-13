@@ -13,9 +13,10 @@ struct FatlineApp: App {
 private struct AppRoot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSplash = true
+    @State private var splashGone = false
 
     var body: some View {
-        Composer()
+        Composer(splashGone: splashGone)
             .overlay {
                 if showSplash {
                     SplashScreen()
@@ -25,7 +26,7 @@ private struct AppRoot: View {
             .statusBarHidden(showSplash)
             .task {
                 try? await Task.sleep(for: .seconds(0.4))
-                withAnimation(.easeOut(duration: 0.3)) { showSplash = false }
+                withAnimation(.easeOut(duration: 0.3)) { showSplash = false } completion: { splashGone = true }
             }
     }
 }
@@ -75,8 +76,18 @@ private struct CastEditor: View {
 
 private struct Composer: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var session = PostingSession()
+    /// Private networks, beside Farcaster. Nothing shows them yet.
+    @State private var networks = NetworkModel()
+    @State private var showNetworks = false
+    /// Add Network was tapped in the sheet, so the join steps open once it has closed.
+    @State private var addAfterSheet = false
+    @State private var addingNetwork = false
     @State private var showDiscardRetry = false
+    @State private var builds = BuildCheck()
+    /// An alert shown during the splash would sit over it.
+    let splashGone: Bool
 
     /// Changing the connection replaces the feed, so nothing keeps reading through the old one.
     private struct FeedIdentity: Hashable {
@@ -86,9 +97,20 @@ private struct Composer: View {
 
     private static let composerInset = FatlineStyle.gutter
 
+    /// What the network reads restart on: another network, the app coming forward, or one joined or left.
+    private struct NetworkPoll: Hashable {
+        let host: String?
+        let active: Bool
+        let count: Int
+    }
+
     var body: some View {
         Group {
-            if session.account?.fid != nil, session.savedConnection == nil, !Connection.isSetByLaunch {
+            if let membership = networks.selected {
+                // Its own identity, so switching networks starts clean.
+                NetworkHome(membership: membership) { showNetworks = true }
+                    .id(membership.host)
+            } else if session.account?.fid != nil, session.savedConnection == nil, !Connection.isSetByLaunch {
                 ConnectionSetup(finish: session.useConnection)
             } else if let fid = session.account?.fid {
                 FeedHome(
@@ -105,18 +127,47 @@ private struct Composer: View {
                     changeConnection: session.useConnection,
                     compose: session.openComposer,
                     signOut: session.signOut,
-                    deleteCast: session.deleteCast
+                    deleteCast: session.deleteCast,
+                    switchNetwork: networks.memberships.isEmpty ? nil : { showNetworks = true },
+                    othersHaveNews: networks.othersHaveNews
                 )
                 .id(FeedIdentity(fid: fid, connection: session.connection))
                 .overlay(alignment: .bottom) {
-                    // Sits above the floating compose button, which is 56 points tall and 20 from the bottom.
-                    if !session.showComposer { postToastHost.padding(.bottom, 88) }
+                    // Sits above the floating compose button.
+                    if !session.showComposer { postToastHost.padding(.bottom, FatlineStyle.plusClearance) }
                 }
             } else {
-                WelcomeFlow(session: session) { recoveryForm }
+                GettingStarted(session: session, switchNetwork: networks.memberships.isEmpty ? nil : { showNetworks = true }) {
+                    recoveryForm
+                }
             }
         }
         .tint(FatlineStyle.action)
+        .sheet(isPresented: $showNetworks, onDismiss: {
+            if addAfterSheet {
+                addAfterSheet = false
+                addingNetwork = true
+            }
+        }) {
+            NetworksSheet {
+                addAfterSheet = true
+                showNetworks = false
+            }
+            .tint(FatlineStyle.action)
+        }
+        .fullScreenCover(isPresented: $addingNetwork) {
+            AddNetworkFlow { addingNetwork = false }
+        }
+        // Reads the network showing, and looks for news in the others, now and each minute while the
+        // app is in front. Coming forward starts it again, so it reads right away.
+        .task(id: NetworkPoll(host: networks.selectedHost, active: scenePhase == .active, count: networks.memberships.count)) {
+            guard scenePhase == .active, !networks.memberships.isEmpty else { return }
+            while !Task.isCancelled {
+                await networks.refresh()
+                await networks.checkOthers()
+                try? await Task.sleep(for: .seconds(NetworkModel.pollInterval))
+            }
+        }
         .fullScreenCover(isPresented: Bindable(session).showComposer) {
             composerSurface.tint(FatlineStyle.action)
         }
@@ -128,13 +179,30 @@ private struct Composer: View {
         }
         .onAppear(perform: session.loadSavedAccount)
         .task(id: session.account?.fid) { await session.checkKey() }
+        .task { await builds.runIfDue() }
+        #if DEBUG
+        .task { await networks.joinFromLaunch() }
+        #endif
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else {
                 if session.ready { session.saveDraft() }
                 return
             }
             session.checkKeyIfDue()
+            Task { await builds.runIfDue() }
         }
+        // The composer is a full-screen cover, so the offer waits until it closes.
+        .alert(builds.offered.map { "Fatline build \($0.build) is available" } ?? "", isPresented: Binding(
+            get: { builds.offered != nil && splashGone && !session.showComposer },
+            set: { if !$0 { builds.dismiss() } }
+        ), presenting: builds.offered) { offer in
+            Button("Open TestFlight") { openURL(offer.link) }
+            Button("Later", role: .cancel) {}
+        } message: { _ in
+            Text("You have build \(builds.current).")
+        }
+        // Last, so the covers and sheets above have it too.
+        .environment(networks)
     }
 
     private var composerSurface: some View {
@@ -188,8 +256,16 @@ private struct Composer: View {
     private var recoveryForm: some View {
         RecoveryPhraseForm(
             busy: session.busy, error: session.recoveryError, hasPendingRegistration: session.account?.registration != nil,
-            connect: session.importPhrase, retry: { Task { await session.completeRegistration() } }
+            connect: importPhrase, retry: { Task { await session.completeRegistration() } }
         )
+    }
+
+    /// Signs in, and approves this iPhone for networks with the same phrase, so joining one later
+    /// doesn't ask for it again. The phrase isn't kept. As the Mac's sign-in does.
+    private func importPhrase(_ phrase: String) {
+        session.importPhrase(phrase)
+        let networks = networks
+        if networks.needsPhrase { Task { try? await networks.approveDevice(phrase: phrase) } }
     }
 
     private var composerHeader: some View {

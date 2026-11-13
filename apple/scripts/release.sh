@@ -6,6 +6,12 @@ cd "$(dirname "$0")/.."
 
 work=DerivedData.noindex/Release
 profile=${FATLINE_NOTARY_PROFILE:-fatline-notary}
+# For a pilot build: a settings file laid over the build, which has to set FATLINE_PILOT_FEED.
+overlay=()
+if [ -n "${FATLINE_PILOT_XCCONFIG:-}" ]; then
+  [ -f "$FATLINE_PILOT_XCCONFIG" ] || { echo "No settings file at $FATLINE_PILOT_XCCONFIG." >&2; exit 1; }
+  overlay=(-xcconfig "$FATLINE_PILOT_XCCONFIG")
+fi
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "Commit or discard these changes first, so the build matches a commit:" >&2
@@ -45,7 +51,7 @@ archive="$work/Fatline.xcarchive"
 echo "Archiving..."
 if ! xcodebuild archive -project Fatline.xcodeproj -scheme Mac -configuration Release \
   -destination 'generic/platform=macOS' -archivePath "$archive" -derivedDataPath DerivedData.noindex/Archive \
-  -allowProvisioningUpdates >"$work/archive.log" 2>&1; then
+  ${overlay[@]+"${overlay[@]}"} -allowProvisioningUpdates >"$work/archive.log" 2>&1; then
   grep -E 'error:|\*\* ARCHIVE' "$work/archive.log" | tail -20 >&2 || true
   echo "Archive failed. Full log: $work/archive.log" >&2
   exit 1
@@ -65,6 +71,12 @@ if [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = com.
   echo "The app still has the example bundle ID. Set FATLINE_BUNDLE_ID in Signing.local.xcconfig." >&2
   exit 1
 fi
+pilot=$(/usr/libexec/PlistBuddy -c 'Print :FatlinePilotFeed' "$plist" 2>/dev/null || true)
+if [ -n "${FATLINE_PILOT_XCCONFIG:-}" ] && [ -z "$pilot" ]; then
+  echo "The settings file didn't set FATLINE_PILOT_FEED, so this wouldn't be a pilot build." >&2
+  exit 1
+fi
+[ -z "$pilot" ] || echo "Pilot build: it checks $pilot for updates."
 if [ ! -f "$app/Contents/embedded.provisionprofile" ]; then
   echo "The app has no provisioning profile, so it couldn't save its posting key." >&2
   exit 1
@@ -81,14 +93,7 @@ rm "$work/notarize.zip"
 
 echo "Making the disk image..."
 dmg="$work/Fatline.dmg"
-stage="$work/dmg"
-mkdir "$stage"
-ditto "$app" "$stage/Fatline.app"
-ln -s /Applications "$stage/Applications"
-# Finder's saved window: the app on the left, Applications on the right.
-cp scripts/dmg.DS_Store "$stage/.DS_Store"
-hdiutil create -quiet -volname Fatline -srcfolder "$stage" -fs APFS -format ULFO "$dmg"
-rm -rf "$stage"
+scripts/make-dmg.sh "$app" "$dmg"
 
 identity=$(codesign -dvv "$app" 2>&1 | sed -n 's/^Authority=\(Developer ID Application:.*\)$/\1/p')
 codesign --sign "$identity" --timestamp "$dmg"

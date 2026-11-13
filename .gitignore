@@ -13,3 +13,10 @@ Signing.local.xcconfig
 node_modules/
 *.cer
 *.certSigningRequest
+.env*
+.dev.vars*
+!*.example
+*.pem
+.wrangler/
+# Agent worktrees and Xcode build output
+.claude/worktrees/

@@ -38,6 +38,41 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: current), future)
     }
 
+    func testLegacyDraftOnlyMovesToTheFirstAccount() throws {
+        let folder = try temporaryFolder()
+        let legacy = DraftStore(directory: folder)
+        let first = DraftStore(directory: folder.appending(path: "Accounts/1"))
+        let second = DraftStore(directory: folder.appending(path: "Accounts/2"))
+        try legacy.save("First account draft")
+        try first.adoptLegacy(from: legacy)
+        XCTAssertEqual(try first.load(), "First account draft")
+        try legacy.save("Residual legacy draft")
+        try second.adoptLegacy(from: legacy)
+        XCTAssertEqual(try second.load(), "")
+    }
+
+    func testEachNetworkKeepsItsOwnDraft() throws {
+        let folder = try temporaryFolder()
+        let cabin = NetworkDrafts.store(for: "cabin.example", in: folder)
+        let pine = NetworkDrafts.store(for: "localhost:8788", in: folder)
+        try cabin.save("Dinner at 7?")
+        try pine.save("Tables are in the garage")
+        XCTAssertEqual(try NetworkDrafts.store(for: "cabin.example", in: folder).load(), "Dinner at 7?")
+        XCTAssertEqual(try NetworkDrafts.store(for: "localhost:8788", in: folder).load(), "Tables are in the garage")
+        // Posting clears the draft by saving it empty, as the Farcaster composer does.
+        try cabin.save("")
+        XCTAssertEqual(try cabin.load(), "")
+        XCTAssertEqual(try pine.load(), "Tables are in the garage")
+    }
+
+    func testNetworkDraftFolderStaysInsideItsOwn() {
+        XCTAssertEqual(NetworkDrafts.folderName("harbor.example.net"), "harbor.example.net")
+        XCTAssertEqual(NetworkDrafts.folderName("localhost:8787"), "localhost:8787")
+        XCTAssertEqual(NetworkDrafts.folderName("../x/y"), ".._x_y")
+        XCTAssertEqual(NetworkDrafts.folderName(".."), "_..")
+        XCTAssertEqual(NetworkDrafts.folderName(""), "_")
+    }
+
     private func temporaryFolder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

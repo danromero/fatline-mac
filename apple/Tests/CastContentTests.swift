@@ -54,6 +54,15 @@ final class CastImageTests: XCTestCase {
         XCTAssertNil(CastImages.decode(Data("not a picture".utf8), maxPixels: 32))
     }
 
+    func testASizeThatWrapsAroundIsRefused() {
+        XCTAssertTrue(CastImages.acceptsSize(width: 4000, height: 3000))
+        XCTAssertFalse(CastImages.acceptsSize(width: 20_000, height: 20_000), "over the limit")
+        let huge = Int(UInt32.max)
+        XCTAssertFalse(CastImages.acceptsSize(width: huge, height: huge), "the product wraps around")
+        XCTAssertFalse(CastImages.acceptsSize(width: 0, height: 100))
+        XCTAssertFalse(CastImages.acceptsSize(width: -4, height: -4))
+    }
+
     func testARedirectIsHeldToTheSameRulesAsTheCast() async throws {
         let redirects = CastImages.Redirects()
         let start = try XCTUnwrap(URL(string: "https://example.com/a.png"))

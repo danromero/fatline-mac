@@ -390,18 +390,20 @@ actor LocalFeed {
     }
 
     /// Reads who this account follows and rebuilds the feed around that. Only a failed read of the list
-    /// throws, and it keeps the old list.
+    /// throws, and it keeps the old list. A list read in the last 30 seconds is still current, so then
+    /// only the feed is brought up to date. A failed read doesn't count, so it can be tried again at once.
     func rebuildPeople() async throws -> FeedFetch {
-        guard isDue(saved.lastPeople, Self.peopleGap) else { throw FeedHTTPError(status: 429) }
-        saved.lastPeople = now()
-        store()
-        let people = try await reader.follows(fid: fid)
-        let before = Set(saved.file.people.map(\.id))
-        let added = !saved.hasList || people.contains { !before.contains($0.id) }
-        saved.hasList = true
-        saved.file.people = people
-        saved.file.casts = tidy(saved.file.casts)
-        store()
+        var added = false
+        if !saved.hasList || isDue(saved.lastPeople, Self.peopleGap) {
+            let people = try await reader.follows(fid: fid)
+            let before = Set(saved.file.people.map(\.id))
+            added = !saved.hasList || people.contains { !before.contains($0.id) }
+            saved.hasList = true
+            saved.lastPeople = now()
+            saved.file.people = people
+            saved.file.casts = tidy(saved.file.casts)
+            store()
+        }
         do {
             // Someone new on the list has casts a poll wouldn't reach.
             if added {

@@ -20,6 +20,7 @@ const handlers: { [Name in ApiName]: (...args: Parameters<Api[Name]>) => unknown
   deleteCast: (hash) => session.deleteCast(hash),
   checkKeyIfDue: () => session.checkKeyIfDue(),
   signOut: () => session.signOut(),
+  diagnostics: () => session.diagnostics(),
   openSetup: (page) => {
     chrome.tabs.create({ url: chrome.runtime.getURL(page === "connection" ? "setup.html#connection" : "setup.html") });
   },

@@ -17,6 +17,9 @@ struct FeedHome: View {
     let compose: () -> Void
     let signOut: () throws -> Void
     let deleteCast: (FeedCast) async throws -> Void
+    /// Opens the Networks sheet from the title, once this iPhone has a network.
+    let switchNetwork: (() -> Void)?
+    let othersHaveNews: Bool
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
@@ -32,7 +35,8 @@ struct FeedHome: View {
     init(directory: URL, fid: UInt64, username: String?, signedIn: Bool, signOutBlock: String?, notice: String?, latestPost: FeedCast?,
          canDelete: Bool, connectionName: String, savedConnection: ConnectionChoice?,
          changeConnection: @escaping (ConnectionChoice) throws -> Void, compose: @escaping () -> Void,
-         signOut: @escaping () throws -> Void, deleteCast: @escaping (FeedCast) async throws -> Void) {
+         signOut: @escaping () throws -> Void, deleteCast: @escaping (FeedCast) async throws -> Void,
+         switchNetwork: (() -> Void)? = nil, othersHaveNews: Bool = false) {
         _model = State(initialValue: FeedModel(directory: directory, ownFID: fid, ownHandle: username))
         self.username = username
         self.signedIn = signedIn
@@ -46,6 +50,8 @@ struct FeedHome: View {
         self.compose = compose
         self.signOut = signOut
         self.deleteCast = deleteCast
+        self.switchNetwork = switchNetwork
+        self.othersHaveNews = othersHaveNews
     }
 
     var body: some View {
@@ -86,7 +92,7 @@ struct FeedHome: View {
                         }
                     }
                     .scrollTargetLayout()
-                    .padding(.bottom, 88)
+                    .padding(.bottom, FatlineStyle.plusClearance)
                     .id(Self.feedTop)
                 }
                 .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.2) { visible in
@@ -126,20 +132,7 @@ struct FeedHome: View {
                 }
             }
             .refreshable { await model.refresh(reason: "pull") }
-            .overlay(alignment: .bottomTrailing) {
-                Button(action: compose) {
-                    Image(systemName: "plus")
-                        .font(FatlineStyle.plusGlyph)
-                        .foregroundStyle(FatlineStyle.actionInk)
-                        .frame(width: 56, height: 56)
-                        .background(FatlineStyle.action, in: .circle)
-                }
-                .buttonStyle(FloatingButtonStyle())
-                .accessibilityLabel("Compose")
-                .accessibilityIdentifier("compose")
-                .padding(.trailing, FatlineStyle.gutter)
-                .padding(.bottom, 20)
-            }
+            .overlay(alignment: .bottomTrailing) { ComposeButton(action: compose) }
         }
         .background(FatlineStyle.paper.ignoresSafeArea())
         .foregroundStyle(FatlineStyle.ink)
@@ -226,42 +219,33 @@ struct FeedHome: View {
     }
 
     private var header: some View {
-        Image("Portal")
-            .resizable()
-            .frame(width: 36, height: 36)
-            .clipShape(.circle)
-            .accessibilityLabel("Fatline feed")
-            .frame(maxWidth: .infinity, minHeight: FatlineStyle.headerHeight)
-            .overlay(alignment: .trailing) {
-                Button { showSettings = true } label: {
-                    Image(systemName: "ellipsis")
-                        .font(FatlineStyle.markGlyph)
-                        .foregroundStyle(FatlineStyle.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Settings")
-                .accessibilityIdentifier("settings")
-                // The 15-point glyph is centered in its 44-point target, which puts its edge on the gutter.
-                .padding(.trailing, 1.5)
+        Group {
+            if let switchNetwork {
+                NetworkTitleButton(membership: nil, othersHaveNews: othersHaveNews, action: switchNetwork)
+            } else {
+                Image("Portal")
+                    .resizable()
+                    .frame(width: 36, height: 36)
+                    .clipShape(.circle)
+                    .accessibilityLabel("Fatline feed")
             }
-            .padding(.bottom, FatlineStyle.headerGap)
-    }
-}
-
-/// Stays solid while pressed. The plus floats over the feed, and the plain style's fade let the text
-/// underneath show through it. The haptic plays on touch-down, ahead of the composer opening on release.
-private struct FloatingButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.92 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-            .onChange(of: configuration.isPressed) { _, pressed in
-                if pressed { Platform.haptic(.tap) }
+        }
+        .frame(maxWidth: .infinity, minHeight: FatlineStyle.headerHeight)
+        .overlay(alignment: .trailing) {
+            Button { showSettings = true } label: {
+                Image(systemName: "ellipsis")
+                    .font(FatlineStyle.markGlyph)
+                    .foregroundStyle(FatlineStyle.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("settings")
+            // The 15-point glyph is centered in its 44-point target, which puts its edge on the gutter.
+            .padding(.trailing, 1.5)
+        }
+        .padding(.bottom, FatlineStyle.headerGap)
     }
 }
 

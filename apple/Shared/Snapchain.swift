@@ -141,13 +141,15 @@ struct SnapchainMessage {
         return UInt32(seconds)
     }
 
+    /// `network` is Farcaster mainnet unless given. Fatline networks pass nil, which leaves the field
+    /// out so no Farcaster node accepts the message.
     static func sign(type: UInt64, field: UInt64, body: Data, fid: UInt64,
-                     key: Curve25519.Signing.PrivateKey, date: Date = .now) throws -> Self {
+                     key: Curve25519.Signing.PrivateKey, date: Date = .now, network: UInt64? = 1) throws -> Self {
         var messageData = Protobuf()
         messageData.integer(1, type)
         messageData.integer(2, fid)
         messageData.integer(3, UInt64(try timestamp(date)))
-        messageData.integer(4, 1) // Mainnet
+        if let network { messageData.integer(4, network) }
         messageData.bytes(field, body)
 
         var hasher = blake3_hasher()

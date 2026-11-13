@@ -5,27 +5,72 @@ import SwiftUI
 /// Sign in with a recovery phrase, the last step of setup.
 struct SignInView: View {
     @Environment(AppState.self) private var state
+
+    private var session: PostingSession { state.session }
+
+    var body: some View {
+        RecoveryPhraseStep(
+            title: "Import your account",
+            instruction: "Enter your Farcaster recovery phrase, not another wallet’s.",
+            busy: session.busy,
+            error: session.recoveryError,
+            submit: importPhrase
+        ) { clearField in
+            if session.account?.registration != nil {
+                Button("Retry Connection") {
+                    clearField()
+                    Task { await session.completeRegistration() }
+                }
+                .buttonStyle(.plain)
+                .font(FatlineStyle.body)
+                .foregroundStyle(FatlineStyle.action)
+            }
+        }
+    }
+
+    /// Signs in, and approves this Mac for networks with the same phrase, so adding one later
+    /// doesn't ask for it again.
+    private func importPhrase(_ phrase: String) {
+        session.importPhrase(phrase)
+        let networks = state.networks
+        if networks.needsPhrase { Task { try? await networks.approveDevice(phrase: phrase) } }
+    }
+}
+
+/// The recovery phrase step: a box that shows only bullets, a line for problems, and Import. Setup
+/// uses it to sign in, and joining a network uses it to approve this Mac's key.
+struct RecoveryPhraseStep<Extra: View>: View {
+    let title: String
+    let instruction: String
+    /// A short line above Import, when there's something to say.
+    var footnote: String? = nil
+    let busy: Bool
+    /// Shown while the box is empty, so a problem with the last phrase doesn't stay once typing starts.
+    let error: String?
+    let submit: (String) -> Void
+    /// More actions above Import. They get a way to empty the box.
+    @ViewBuilder let extra: (_ clearField: @escaping () -> Void) -> Extra
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    // The phrase controls the whole account and is only needed once, to register a posting key,
-    // so it stays in memory until Import or quitting and is never saved anywhere.
+    // The phrase controls the whole account and is only needed once, so it stays in memory until
+    // Import or quitting and is never saved anywhere.
     @State private var text = ""
     @State private var oversized = false
     @State private var pastedClipboard: Int?
     @State private var editing = false
 
-    private static let maxBytes = 1024
+    private static var maxBytes: Int { 1024 }
 
-    private var session: PostingSession { state.session }
     private var words: [Substring] { text.split(whereSeparator: \.isWhitespace) }
     private var validLength: Bool { [12, 24].contains(words.count) }
     private var feedback: String? {
         if oversized || (!editing && !words.isEmpty && !validLength) { return "Enter 12 or 24 words." }
-        return text.isEmpty ? session.recoveryError : nil
+        return text.isEmpty ? error : nil
     }
 
     var body: some View {
         Group {
-            if session.busy {
+            if busy {
                 importing
             } else {
                 form
@@ -36,7 +81,7 @@ struct SignInView: View {
         .tint(FatlineStyle.action)
         .background(FatlineStyle.paper)
         .fatlineStepBar()
-        .navigationBarBackButtonHidden(session.busy)
+        .navigationBarBackButtonHidden(busy)
         .onChange(of: text) { previous, current in
             // An over-long previous value is the rollback below, not an edit.
             guard previous.utf8.count <= Self.maxBytes else { return }
@@ -82,10 +127,7 @@ struct SignInView: View {
         // Scrolls only when a long error won't fit, so it can't run under the buttons.
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                FatlineStepHeader(
-                    title: "Import your account",
-                    instruction: "Enter your Farcaster recovery phrase, not another wallet’s."
-                )
+                FatlineStepHeader(title: title, instruction: instruction)
                 phraseField
                     .padding(.top, 20)
                 feedbackLine
@@ -130,14 +172,11 @@ struct SignInView: View {
 
     private var actions: some View {
         VStack(spacing: 8) {
-            if session.account?.registration != nil {
-                Button("Retry Connection") {
-                    clearField()
-                    Task { await session.completeRegistration() }
-                }
-                .buttonStyle(.plain)
-                .font(FatlineStyle.body)
-                .foregroundStyle(FatlineStyle.action)
+            extra(clearField)
+            if let footnote {
+                Text(footnote)
+                    .font(FatlineStyle.meta)
+                    .foregroundStyle(FatlineStyle.secondary)
             }
             Button(action: importPhrase) {
                 Text("Import").frame(maxWidth: .infinity)
@@ -165,7 +204,7 @@ struct SignInView: View {
         let phrase = words.joined(separator: " ")
         clearPastedPhrase()
         clearField()
-        session.importPhrase(phrase)
+        submit(phrase)
     }
 }
 
